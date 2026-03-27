@@ -38,7 +38,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         if: env.CATALOG_PAT != ''
         run: |
-          JAR_NAME=$(ls build/libs/*-all.jar | xargs -n1 basename | head -1)
+          JAR_NAME=$(basename "$(ls build/libs/*-all.jar | head -1)")
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${JAR_NAME}"
 
           git clone https://x-access-token:${CATALOG_PAT}@github.com/sceriff0/flowpath-catalog.git /tmp/catalog
