@@ -51,7 +51,7 @@ jobs:
       - name: Detect JAR filename
         id: jar
         run: |
-          JAR_NAME=$(ls build/libs/*-all.jar | head -1 | xargs basename)
+          JAR_NAME=$(basename "$(ls build/libs/*-all.jar | head -1)")
           echo "name=$JAR_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Check catalog token
