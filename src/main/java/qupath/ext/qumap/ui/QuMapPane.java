@@ -202,6 +202,16 @@ public class QuMapPane extends BorderPane {
 
         polygonSelector.setOnPolygonComplete(this::onPolygonComplete);
 
+        // Sync marker overlay zoom/pan with main canvas
+        umapCanvas.setOnViewChanged(() -> {
+            if (markerOverlayVisible) {
+                markerOverlay.syncView(
+                        umapCanvas.getViewMinX(), umapCanvas.getViewMaxX(),
+                        umapCanvas.getViewMinY(), umapCanvas.getViewMaxY(),
+                        umapCanvas.isViewOverride());
+            }
+        });
+
         legend.setOnPopulationRemove(this::removePopulationTag);
 
         // --- Listen for image changes ---
@@ -363,9 +373,16 @@ public class QuMapPane extends BorderPane {
 
     private <T> void commitSpinner(Spinner<T> spinner) {
         if (spinner.isEditable()) {
-            String text = spinner.getEditor().getText();
-            spinner.getValueFactory().setValue(
-                    spinner.getValueFactory().getConverter().fromString(text));
+            try {
+                String text = spinner.getEditor().getText();
+                spinner.getValueFactory().setValue(
+                        spinner.getValueFactory().getConverter().fromString(text));
+            } catch (Exception e) {
+                // Reset editor text to current value on parse failure
+                spinner.getEditor().setText(
+                        spinner.getValueFactory().getConverter().toString(spinner.getValue()));
+                statusLabel.setText("Invalid value — reverted to " + spinner.getValue());
+            }
         }
     }
 
@@ -391,7 +408,7 @@ public class QuMapPane extends BorderPane {
         int maxCells = switch (subsampleMode.getValue()) {
             case "Off" -> 0;
             case "Fixed" -> maxCellsSpinner.getValue();
-            default -> maxCellsSpinner.getValue(); // Auto
+            default -> -1; // Auto: let compute service decide based on available memory
         };
 
         // Check if warning needed
@@ -548,13 +565,8 @@ public class QuMapPane extends BorderPane {
 
         String name = tagNameField.getText().trim();
         if (name.isEmpty()) {
-            statusLabel.setText("Enter a population name");
-            tagNameField.setStyle("-fx-border-color: #ff4444;");
+            statusLabel.setText("Enter a population name before applying tag");
             tagNameField.requestFocus();
-            // Reset border after 2 seconds
-            var timer = new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2));
-            timer.setOnFinished(ev -> tagNameField.setStyle(""));
-            timer.play();
             return;
         }
 
@@ -577,9 +589,16 @@ public class QuMapPane extends BorderPane {
                 PathClass current = objects[i].getPathClass();
                 String baseName = current != null ? current.getName() : "Unclassified";
                 int originalColor = current != null ? current.getColor() : 0xFF808080;
-                // Strip existing tag suffix if present
-                if (baseName.contains(": ")) {
-                    baseName = baseName.substring(0, baseName.indexOf(": "));
+                // Strip existing tag suffix if present (use lastIndexOf to preserve phenotype names containing ": ")
+                int tagSep = baseName.lastIndexOf(": ");
+                if (tagSep >= 0) {
+                    String possibleTag = baseName.substring(tagSep + 2);
+                    // Only strip if it matches a known population tag name
+                    boolean isKnownTag = populationTags.stream()
+                            .anyMatch(t -> t.name().equals(possibleTag));
+                    if (isKnownTag) {
+                        baseName = baseName.substring(0, tagSep);
+                    }
                 }
                 PathClass derived = PathClass.fromString(baseName + ": " + name,
                         originalColor);

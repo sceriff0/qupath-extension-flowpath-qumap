@@ -14,7 +14,13 @@ public class MarkerOverlayCanvas extends Canvas {
     private static final int MAX_DISPLAY_POINTS = 30000;
     private static final double PADDING = 10;
 
-    public enum ColorScale { BLUE_WHITE_RED, VIRIDIS }
+    public enum ColorScale {
+        BLUE_WHITE_RED(ColorScaleMapper.Scale.BLUE_WHITE_RED),
+        VIRIDIS(ColorScaleMapper.Scale.VIRIDIS);
+
+        final ColorScaleMapper.Scale mapperScale;
+        ColorScale(ColorScaleMapper.Scale s) { this.mapperScale = s; }
+    }
 
     private double[] xValues;
     private double[] yValues;
@@ -166,40 +172,6 @@ public class MarkerOverlayCanvas extends Canvas {
 
     private Color mapColor(double value) {
         double t = (value - colorMin) / (colorMax - colorMin);
-        t = Math.max(0, Math.min(1, t));
-
-        if (colorScale == ColorScale.BLUE_WHITE_RED) {
-            // Blue(-2σ) -> White(0) -> Red(+2σ)
-            if (t < 0.5) {
-                double s = t * 2; // 0..1
-                return Color.color(s, s, 1.0, 0.8); // blue to white
-            } else {
-                double s = (t - 0.5) * 2; // 0..1
-                return Color.color(1.0, 1.0 - s, 1.0 - s, 0.8); // white to red
-            }
-        } else {
-            // Viridis-like: purple -> blue -> teal -> green -> yellow
-            if (t < 0.25) {
-                double s = t / 0.25;
-                return Color.color(0.27 * (1 - s) + 0.13 * s,
-                                   0.0 * (1 - s) + 0.14 * s,
-                                   0.33 * (1 - s) + 0.42 * s, 0.8);
-            } else if (t < 0.5) {
-                double s = (t - 0.25) / 0.25;
-                return Color.color(0.13 * (1 - s) + 0.15 * s,
-                                   0.14 * (1 - s) + 0.40 * s,
-                                   0.42 * (1 - s) + 0.44 * s, 0.8);
-            } else if (t < 0.75) {
-                double s = (t - 0.5) / 0.25;
-                return Color.color(0.15 * (1 - s) + 0.45 * s,
-                                   0.40 * (1 - s) + 0.68 * s,
-                                   0.44 * (1 - s) + 0.19 * s, 0.8);
-            } else {
-                double s = (t - 0.75) / 0.25;
-                return Color.color(0.45 * (1 - s) + 0.99 * s,
-                                   0.68 * (1 - s) + 0.91 * s,
-                                   0.19 * (1 - s) + 0.15 * s, 0.8);
-            }
-        }
+        return ColorScaleMapper.map(t, colorScale.mapperScale, 0.8);
     }
 }

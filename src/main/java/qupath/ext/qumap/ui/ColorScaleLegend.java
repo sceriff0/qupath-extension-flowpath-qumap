@@ -88,31 +88,6 @@ public class ColorScaleLegend extends Canvas {
     }
 
     private Color mapColor(double t) {
-        if (colorScale == MarkerOverlayCanvas.ColorScale.BLUE_WHITE_RED) {
-            if (t < 0.5) {
-                double s = t * 2;
-                return Color.color(s, s, 1.0);
-            } else {
-                double s = (t - 0.5) * 2;
-                return Color.color(1.0, 1.0 - s, 1.0 - s);
-            }
-        } else {
-            // Viridis-like
-            if (t < 0.25) {
-                double s = t / 0.25;
-                return Color.color(lerp(0.27, 0.13, s), lerp(0.0, 0.14, s), lerp(0.33, 0.42, s));
-            } else if (t < 0.5) {
-                double s = (t - 0.25) / 0.25;
-                return Color.color(lerp(0.13, 0.15, s), lerp(0.14, 0.40, s), lerp(0.42, 0.44, s));
-            } else if (t < 0.75) {
-                double s = (t - 0.5) / 0.25;
-                return Color.color(lerp(0.15, 0.45, s), lerp(0.40, 0.68, s), lerp(0.44, 0.19, s));
-            } else {
-                double s = (t - 0.75) / 0.25;
-                return Color.color(lerp(0.45, 0.99, s), lerp(0.68, 0.91, s), lerp(0.19, 0.15, s));
-            }
-        }
+        return ColorScaleMapper.map(t, colorScale.mapperScale, 1.0);
     }
-
-    private static double lerp(double a, double b, double t) { return a + (b - a) * t; }
 }

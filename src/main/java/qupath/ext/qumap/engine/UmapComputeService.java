@@ -66,16 +66,22 @@ public class UmapComputeService {
                 boolean subsampled = false;
 
                 if (maxCells > 0 && n > maxCells) {
+                    // Fixed mode: user-specified limit
                     postStatus("Subsampling %,d -> %,d cells...".formatted(n, maxCells));
                     sampleIndices = stratifiedSample(cellIndex, maxCells);
                     computeN = sampleIndices.length;
                     subsampled = true;
-                } else if (estimatedBytes > freeMemory * 0.6) {
-                    int safeN = Math.min(n, 50000);
-                    postStatus("Memory warning: subsampling to %,d cells".formatted(safeN));
-                    sampleIndices = stratifiedSample(cellIndex, safeN);
-                    computeN = sampleIndices.length;
-                    subsampled = true;
+                } else if (maxCells < 0 || estimatedBytes > freeMemory * 0.6) {
+                    // Auto mode (maxCells == -1) or memory pressure
+                    int autoLimit = (int) Math.min(n, Math.max(20000,
+                            freeMemory * 0.4 / (m * 8 + params.k() * 32 + 2 * 8)));
+                    if (autoLimit < n) {
+                        postStatus("Auto-subsampling %,d -> %,d cells (based on available memory)..."
+                                .formatted(n, autoLimit));
+                        sampleIndices = stratifiedSample(cellIndex, autoLimit);
+                        computeN = sampleIndices.length;
+                        subsampled = true;
+                    }
                 }
 
                 // Build matrix
@@ -232,12 +238,13 @@ public class UmapComputeService {
         boolean[] isSampled = new boolean[n];
         for (int idx : sampleIndices) isSampled[idx] = true;
 
-        // Compute per-marker means for NaN imputation
+        // Pre-fetch all marker arrays once (avoid repeated cloning)
+        double[][] allMarkerValues = new double[m][];
         double[] markerMeans = new double[m];
         for (int j = 0; j < m; j++) {
-            double[] vals = cellIndex.getMarkerValues(j);
+            allMarkerValues[j] = cellIndex.getMarkerValues(j);
             double sum = 0; int cnt = 0;
-            for (double v : vals) {
+            for (double v : allMarkerValues[j]) {
                 if (!Double.isNaN(v)) { sum += v; cnt++; }
             }
             markerMeans[j] = cnt > 0 ? sum / cnt : 0.0;
@@ -246,15 +253,31 @@ public class UmapComputeService {
         // Build sample marker matrix for kNN lookup (with NaN imputation)
         double[][] sampleMarkers = new double[sampleIndices.length][m];
         for (int j = 0; j < m; j++) {
-            double[] vals = cellIndex.getMarkerValues(j);
             for (int s = 0; s < sampleIndices.length; s++) {
-                double v = vals[sampleIndices[s]];
+                double v = allMarkerValues[j][sampleIndices[s]];
                 sampleMarkers[s][j] = Double.isNaN(v) ? markerMeans[j] : v;
             }
         }
 
+        // Pre-compute query vectors for all non-sampled cells (NaN imputed)
+        int remaining = 0;
+        for (int i = 0; i < n; i++) if (!isSampled[i]) remaining++;
+
+        int[] queryIndices = new int[remaining];
+        double[][] queryVectors = new double[remaining][m];
+        int qi = 0;
         for (int i = 0; i < n; i++) {
             if (isSampled[i]) continue;
+            queryIndices[qi] = i;
+            for (int j = 0; j < m; j++) {
+                double v = allMarkerValues[j][i];
+                queryVectors[qi][j] = Double.isNaN(v) ? markerMeans[j] : v;
+            }
+            qi++;
+        }
+
+        for (int q = 0; q < remaining; q++) {
+            if (Thread.currentThread().isInterrupted()) return;
 
             // Find k nearest neighbors in sample
             double[] dists = new double[knn];
@@ -264,9 +287,7 @@ public class UmapComputeService {
             for (int s = 0; s < sampleIndices.length; s++) {
                 double dist = 0;
                 for (int j = 0; j < m; j++) {
-                    double raw = cellIndex.getMarkerValues(j)[i];
-                    double val = Double.isNaN(raw) ? markerMeans[j] : raw;
-                    double d = val - sampleMarkers[s][j];
+                    double d = queryVectors[q][j] - sampleMarkers[s][j];
                     dist += d * d;
                 }
 
@@ -290,8 +311,15 @@ public class UmapComputeService {
                 wy += w * sampleEmbedding[neighbors[k]][1];
                 totalWeight += w;
             }
-            umapX[i] = wx / totalWeight;
-            umapY[i] = wy / totalWeight;
+            int ci = queryIndices[q];
+            umapX[ci] = wx / totalWeight;
+            umapY[ci] = wy / totalWeight;
+
+            // Progress update every 10%
+            if (q % (Math.max(1, remaining / 10)) == 0) {
+                int pct = (int) ((double) q / remaining * 100);
+                postStatus("Projecting remaining cells... %d%%".formatted(pct));
+            }
         }
     }
 

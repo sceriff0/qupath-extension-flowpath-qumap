@@ -72,6 +72,12 @@ public class UmapResult {
         boolean hasTags = populationTags != null && !populationTags.isEmpty();
         String[] markers = cellIndex.getMarkerNames();
 
+        // Pre-fetch all marker value arrays once (avoid cloning per cell per marker)
+        double[][] allMarkerValues = new double[markers.length][];
+        for (int m = 0; m < markers.length; m++) {
+            allMarkerValues[m] = cellIndex.getMarkerValues(m);
+        }
+
         try (var writer = new BufferedWriter(new FileWriter(file))) {
             // Header
             writer.write("cell_id,phenotype,population,centroid_x,centroid_y,umap_x,umap_y");
@@ -89,7 +95,7 @@ public class UmapResult {
 
                 String phenotype;
                 String population = "";
-                int sepIdx = fullLabel.indexOf(": ");
+                int sepIdx = fullLabel.lastIndexOf(": ");
                 if (hasTags && sepIdx >= 0) {
                     phenotype = fullLabel.substring(0, sepIdx);
                     population = fullLabel.substring(sepIdx + 2);
@@ -114,7 +120,7 @@ public class UmapResult {
 
                 // Per-marker: raw, zscore
                 for (int m = 0; m < markers.length; m++) {
-                    double raw = cellIndex.getMarkerValues(m)[i];
+                    double raw = allMarkerValues[m][i];
                     double zscore;
                     if (Double.isNaN(raw) || markerStats == null || markerStats.getStd(markers[m]) <= 1e-10) {
                         zscore = Double.NaN;

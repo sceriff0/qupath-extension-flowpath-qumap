@@ -41,6 +41,21 @@ public class UmapCanvas extends Canvas {
     // Polygon overlay
     private List<double[]> polygonVertices;
 
+    // View change listener
+    private Runnable onViewChanged;
+
+    public void setOnViewChanged(Runnable cb) { this.onViewChanged = cb; }
+
+    private void fireViewChanged() {
+        if (onViewChanged != null) onViewChanged.run();
+    }
+
+    public double getViewMinX() { return effectiveMinX(); }
+    public double getViewMaxX() { return effectiveMaxX(); }
+    public double getViewMinY() { return effectiveMinY(); }
+    public double getViewMaxY() { return effectiveMaxY(); }
+    public boolean isViewOverride() { return viewOverride; }
+
     public UmapCanvas() {
         super(400, 400);
         widthProperty().addListener((obs, o, n) -> repaint());
@@ -62,6 +77,7 @@ public class UmapCanvas extends Canvas {
             viewMaxY = cy + (eMaxY - cy) * factor;
             viewOverride = true;
             repaint();
+            fireViewChanged();
         });
 
         // Pan with middle mouse button
@@ -87,6 +103,7 @@ public class UmapCanvas extends Canvas {
                 viewMaxY = viewMinY + rangeY;
                 viewOverride = true;
                 repaint();
+                fireViewChanged();
                 e.consume();
             }
         });
@@ -184,6 +201,7 @@ public class UmapCanvas extends Canvas {
     public void resetView() {
         viewOverride = false;
         repaint();
+        fireViewChanged();
     }
 
     // --- Coordinate conversion ---
@@ -280,17 +298,28 @@ public class UmapCanvas extends Canvas {
                 gc.setFill(Color.rgb(100, 150, 200, 0.7));
             }
             gc.fillOval(px - halfDot, py - halfDot, dotSize, dotSize);
+        }
 
-            // Population rings
-            if (ringColors != null && ringMasks != null) {
-                for (int p = 0; p < ringColors.size(); p++) {
-                    if (i < ringMasks.get(p).length && ringMasks.get(p)[i]) {
-                        int rc = ringColors.get(p)[0]; // single color per population
-                        gc.setStroke(Color.rgb((rc >> 16) & 0xFF, (rc >> 8) & 0xFF, rc & 0xFF));
-                        gc.setLineWidth(1.5);
-                        double ringR = halfDot + 2;
-                        gc.strokeOval(px - ringR, py - ringR, ringR * 2, ringR * 2);
-                    }
+        // Population rings — separate pass over ALL tagged cells (not subsampled)
+        if (ringColors != null && ringMasks != null) {
+            for (int p = 0; p < ringColors.size(); p++) {
+                boolean[] mask = ringMasks.get(p);
+                int rc = ringColors.get(p)[0];
+                gc.setStroke(Color.rgb((rc >> 16) & 0xFF, (rc >> 8) & 0xFF, rc & 0xFF));
+                gc.setLineWidth(1.5);
+                double ringR = halfDot + 2;
+
+                for (int i = 0; i < xValues.length; i++) {
+                    if (i >= mask.length || !mask[i]) continue;
+                    if (Double.isNaN(xValues[i]) || Double.isNaN(yValues[i])) continue;
+
+                    double px = PADDING_LEFT + ((xValues[i] - eMinX) / rangeX) * plotW;
+                    double py = PADDING_TOP + plotH - ((yValues[i] - eMinY) / rangeY) * plotH;
+
+                    if (px < PADDING_LEFT - dotSize || px > w - PADDING_RIGHT + dotSize ||
+                        py < PADDING_TOP - dotSize || py > h - PADDING_BOTTOM + dotSize) continue;
+
+                    gc.strokeOval(px - ringR, py - ringR, ringR * 2, ringR * 2);
                 }
             }
         }
