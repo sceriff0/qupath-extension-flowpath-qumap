@@ -75,7 +75,7 @@ public class UmapResult {
             // One row per cell
             for (int i = 0; i < umapX.length; i++) {
                 var pc = objects[i].getPathClass();
-                String fullLabel = pc != null ? pc.getName() : "Unclassified";
+                String fullLabel = pc != null ? pc.toString() : "Unclassified";
 
                 String phenotype;
                 String population = "";
