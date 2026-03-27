@@ -54,8 +54,17 @@ jobs:
           JAR_NAME=$(ls build/libs/*-all.jar | head -1 | xargs basename)
           echo "name=$JAR_NAME" >> "$GITHUB_OUTPUT"
 
+      - name: Check catalog token
+        id: catalog_check
+        run: |
+          if [ -n "$CATALOG_PAT" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          CATALOG_PAT: ${{ secrets.CATALOG_PAT }}
+
       - name: Update catalog
-        if: ${{ secrets.CATALOG_PAT != '' }}
+        if: steps.catalog_check.outputs.has_token == 'true'
         env:
           CATALOG_PAT: ${{ secrets.CATALOG_PAT }}
           TAG: ${{ steps.version.outputs.tag }}
