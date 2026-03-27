@@ -26,6 +26,8 @@ jobs:
         run: |
           # Find the shadow JAR asset URL from the release
           JAR_NAME=$(echo '${{ toJSON(github.event.release.assets) }}' | jq -r '.[] | select(.name | endswith("-all.jar")) | .name' | head -1)
+          # GitHub normalizes spaces to dots in release asset filenames
+          JAR_NAME="${JAR_NAME// /.}"
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${JAR_NAME}"
 
           git clone https://x-access-token:${CATALOG_PAT}@github.com/sceriff0/flowpath-catalog.git /tmp/catalog

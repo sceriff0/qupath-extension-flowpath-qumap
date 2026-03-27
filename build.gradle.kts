@@ -34,3 +34,12 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+// Use dots instead of spaces in JAR filename to avoid illegal URI characters
+tasks.withType<com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar> {
+    archiveBaseName.set("FlowPath.-.qUMAP")
+}
+
+tasks.withType<Jar> {
+    archiveBaseName.set("FlowPath.-.qUMAP")
+}
