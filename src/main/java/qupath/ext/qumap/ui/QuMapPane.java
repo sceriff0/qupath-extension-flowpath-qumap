@@ -1,0 +1,689 @@
+package qupath.ext.qumap.ui;
+
+import javafx.application.Platform;
+import javafx.collections.FXCollections;
+import javafx.geometry.Insets;
+import javafx.geometry.Orientation;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.stage.FileChooser;
+import qupath.ext.qumap.engine.UmapComputeService;
+import qupath.ext.qumap.model.*;
+import qupath.lib.gui.QuPathGUI;
+import qupath.lib.images.ImageData;
+import qupath.lib.objects.PathObject;
+import qupath.lib.objects.classes.PathClass;
+
+import java.io.File;
+import java.util.*;
+
+/**
+ * Main panel for the qUMAP extension.
+ * Orchestrates UMAP computation, visualization, polygon gating, and marker overlays.
+ */
+public class QuMapPane extends BorderPane {
+
+    private final QuPathGUI qupath;
+
+    // Data
+    private CellIndex cellIndex;
+    private MarkerStats markerStats;
+    private UmapResult umapResult;
+    private PathClass[] originalClasses;      // backup for UNFOCUSED restore
+    private final List<PopulationTag> populationTags = new ArrayList<>();
+
+    // Engine
+    private final UmapComputeService computeService;
+
+    // UI components
+    private final UmapCanvas umapCanvas;
+    private final MarkerOverlayCanvas markerOverlay;
+    private final PhenotypeLegend legend;
+    private final ColorScaleLegend colorScaleLegend;
+    private final PolygonSelector polygonSelector;
+    private final Label statusLabel;
+    private final ProgressIndicator progressIndicator;
+
+    // Controls
+    private final Spinner<Integer> kSpinner;
+    private final Spinner<Integer> epochsSpinner;
+    private final Spinner<Double> dotSizeSpinner;
+    private final Spinner<Integer> maxCellsSpinner;
+    private final ComboBox<String> subsampleMode;
+    private final ComboBox<String> markerDropdown;
+    private final ComboBox<String> colorScaleDropdown;
+    private final TextField tagNameField;
+    private final ColorPicker tagColorPicker;
+    private final Button computeButton;
+    private final ToggleButton drawButton;
+    private final Button clearButton;
+    private final Button applyTagButton;
+
+    // Marker overlay visibility
+    private final SplitPane centerSplit;
+    private boolean markerOverlayVisible = false;
+
+    public QuMapPane(QuPathGUI qupath) {
+        this.qupath = qupath;
+
+        // --- Initialize components ---
+        computeService = new UmapComputeService();
+        umapCanvas = new UmapCanvas();
+        markerOverlay = new MarkerOverlayCanvas();
+        legend = new PhenotypeLegend();
+        colorScaleLegend = new ColorScaleLegend();
+        polygonSelector = new PolygonSelector(umapCanvas);
+        statusLabel = new Label("Load an image with cell detections");
+        progressIndicator = new ProgressIndicator();
+        progressIndicator.setMaxSize(16, 16);
+        progressIndicator.setVisible(false);
+
+        // --- Controls ---
+        kSpinner = new Spinner<>(5, 50, 15, 5);
+        kSpinner.setPrefWidth(70);
+        kSpinner.setEditable(true);
+
+        epochsSpinner = new Spinner<>(50, 1000, 200, 50);
+        epochsSpinner.setPrefWidth(80);
+        epochsSpinner.setEditable(true);
+
+        dotSizeSpinner = new Spinner<>(1.0, 5.0, 2.0, 0.5);
+        dotSizeSpinner.setPrefWidth(65);
+        dotSizeSpinner.setEditable(true);
+        dotSizeSpinner.valueProperty().addListener((obs, o, n) -> {
+            umapCanvas.setDotSize(n);
+            markerOverlay.setDotSize(n);
+        });
+
+        maxCellsSpinner = new Spinner<>(10000, 200000, 50000, 10000);
+        maxCellsSpinner.setPrefWidth(90);
+        maxCellsSpinner.setEditable(true);
+
+        subsampleMode = new ComboBox<>(FXCollections.observableArrayList("Auto", "Off", "Fixed"));
+        subsampleMode.setValue("Auto");
+        subsampleMode.setPrefWidth(70);
+
+        markerDropdown = new ComboBox<>();
+        markerDropdown.setPromptText("-- none --");
+        markerDropdown.setPrefWidth(120);
+        markerDropdown.setOnAction(e -> onMarkerSelected());
+
+        colorScaleDropdown = new ComboBox<>(FXCollections.observableArrayList("Z-score", "Raw"));
+        colorScaleDropdown.setValue("Z-score");
+        colorScaleDropdown.setPrefWidth(75);
+        colorScaleDropdown.setOnAction(e -> onMarkerSelected());
+
+        computeButton = new Button("Compute UMAP");
+        computeButton.setOnAction(e -> runUmap());
+
+        drawButton = new ToggleButton("Draw Polygon");
+        drawButton.setOnAction(e -> {
+            if (drawButton.isSelected()) {
+                polygonSelector.activate();
+            } else {
+                polygonSelector.deactivate();
+            }
+        });
+
+        clearButton = new Button("Clear Shape");
+        clearButton.setOnAction(e -> clearPolygon());
+
+        tagNameField = new TextField();
+        tagNameField.setPromptText("Population name");
+        tagNameField.setPrefWidth(100);
+
+        tagColorPicker = new ColorPicker(Color.ORANGE);
+        tagColorPicker.setPrefWidth(50);
+
+        applyTagButton = new Button("Apply Tag");
+        applyTagButton.setOnAction(e -> applyPopulationTag());
+
+        var exportButton = new Button("Export CSV");
+        exportButton.setOnAction(e -> exportCsv());
+
+        // --- Layout ---
+
+        // Toolbar row 1
+        var row1 = new HBox(6,
+                computeButton, progressIndicator,
+                new Label("k:"), kSpinner,
+                new Label("Epochs:"), epochsSpinner,
+                new Label("Dot:"), dotSizeSpinner,
+                new Separator(Orientation.VERTICAL),
+                new Label("Subsample:"), subsampleMode,
+                new Label("Max:"), maxCellsSpinner
+        );
+        row1.setPadding(new Insets(4));
+
+        // Toolbar row 2
+        var row2 = new HBox(6,
+                new Label("Marker:"), markerDropdown, colorScaleDropdown,
+                new Separator(Orientation.VERTICAL),
+                drawButton, clearButton,
+                new Separator(Orientation.VERTICAL),
+                new Label("Tag:"), tagNameField, tagColorPicker, applyTagButton,
+                new Separator(Orientation.VERTICAL),
+                exportButton
+        );
+        row2.setPadding(new Insets(4));
+
+        var toolbar = new VBox(row1, row2);
+        toolbar.setStyle("-fx-background-color: #333;");
+        setTop(toolbar);
+
+        // Center: UMAP canvas + optional marker overlay + legend
+        var legendBox = new VBox(legend, colorScaleLegend);
+        VBox.setVgrow(legend, Priority.ALWAYS);
+
+        centerSplit = new SplitPane(umapCanvas, legendBox);
+        centerSplit.setDividerPositions(0.85);
+        setCenter(centerSplit);
+
+        // Status bar
+        var statusBar = new HBox(8, statusLabel);
+        statusBar.setPadding(new Insets(3, 6, 3, 6));
+        statusBar.setStyle("-fx-background-color: #2a2a2a;");
+        setBottom(statusBar);
+
+        // --- Callbacks ---
+        computeService.setOnComplete(this::onUmapComplete);
+        computeService.setOnError(this::onUmapError);
+        computeService.setOnStatusUpdate(s -> statusLabel.setText(s));
+
+        polygonSelector.setOnPolygonComplete(this::onPolygonComplete);
+
+        legend.setOnPopulationRemove(this::removePopulationTag);
+
+        // --- Listen for image changes ---
+        qupath.imageDataProperty().addListener((obs, oldImg, newImg) -> {
+            Platform.runLater(this::initializeFromImage);
+        });
+
+        // --- Keyboard shortcuts ---
+        setOnKeyPressed(e -> {
+            switch (e.getCode()) {
+                case ESCAPE -> {
+                    if (polygonSelector.isActive()) {
+                        polygonSelector.deactivate();
+                        drawButton.setSelected(false);
+                    }
+                }
+                case E -> {
+                    if (e.isControlDown()) exportCsv();
+                }
+                default -> {}
+            }
+        });
+
+        // Initialize if image already loaded
+        Platform.runLater(this::initializeFromImage);
+    }
+
+    // --- Initialization ---
+
+    private void initializeFromImage() {
+        umapResult = null;
+        cellIndex = null;
+        markerStats = null;
+        originalClasses = null;
+        populationTags.clear();
+        umapCanvas.setData(null, null);
+        markerOverlay.setData(null, null);
+        legend.update(null, null);
+        colorScaleLegend.clear();
+
+        ImageData<?> imageData = qupath.getImageData();
+        if (imageData == null) {
+            statusLabel.setText("No image loaded");
+            return;
+        }
+
+        var detections = imageData.getHierarchy().getDetectionObjects();
+        if (detections.isEmpty()) {
+            statusLabel.setText("No cell detections found");
+            return;
+        }
+
+        // Discover marker names
+        List<String> markers = discoverMarkerNames(imageData, detections);
+        if (markers.isEmpty()) {
+            statusLabel.setText("No markers found in measurements");
+            return;
+        }
+
+        cellIndex = CellIndex.build(detections, markers);
+        markerStats = MarkerStats.compute(cellIndex);
+
+        // Populate marker dropdown
+        markerDropdown.getItems().clear();
+        markerDropdown.getItems().add("-- none --");
+        markerDropdown.getItems().addAll(markers);
+        markerDropdown.setValue("-- none --");
+
+        statusLabel.setText(String.format("%,d cells, %d markers. Ready to compute UMAP.",
+                cellIndex.size(), markers.size()));
+    }
+
+    private List<String> discoverMarkerNames(ImageData<?> imageData, Collection<PathObject> detections) {
+        // Primary: from image metadata channels
+        var channels = imageData.getServer().getMetadata().getChannels();
+        List<String> candidates = new ArrayList<>();
+        for (var ch : channels) {
+            candidates.add(ch.getName());
+        }
+
+        // Validate against actual measurements
+        if (!candidates.isEmpty() && !detections.isEmpty()) {
+            var sample = detections.iterator().next();
+            var measurements = sample.getMeasurements();
+            if (measurements != null) {
+                candidates.removeIf(name -> {
+                    if (measurements.containsKey(name)) return false;
+                    // Check layer-prefixed
+                    for (String key : measurements.keySet()) {
+                        if (key.endsWith("] " + name)) return false;
+                    }
+                    return true;
+                });
+            }
+        }
+
+        // Fallback: from measurements directly
+        if (candidates.isEmpty() && !detections.isEmpty()) {
+            Set<String> exclude = Set.of(
+                    "Centroid X", "Centroid Y", "Centroid X µm", "Centroid Y µm",
+                    "area", "area µm²", "eccentricity", "perimeter", "convex_area",
+                    "axis_major_length", "axis_minor_length", "solidity",
+                    "x", "y", "label", "fov", "cell_size"
+            );
+            var sample = detections.iterator().next();
+            var measurements = sample.getMeasurements();
+            if (measurements != null) {
+                for (String key : measurements.keySet()) {
+                    boolean skip = false;
+                    for (String ex : exclude) {
+                        if (key.equalsIgnoreCase(ex) || key.startsWith(ex)) { skip = true; break; }
+                    }
+                    if (!skip) candidates.add(key);
+                }
+            }
+        }
+
+        return candidates;
+    }
+
+    // --- UMAP Computation ---
+
+    private void runUmap() {
+        if (cellIndex == null) {
+            statusLabel.setText("No cell data available");
+            return;
+        }
+
+        UmapParameters params = new UmapParameters(
+                kSpinner.getValue(),
+                0.1,
+                1.0,
+                epochsSpinner.getValue()
+        );
+
+        int maxCells = switch (subsampleMode.getValue()) {
+            case "Off" -> 0;
+            case "Fixed" -> maxCellsSpinner.getValue();
+            default -> maxCellsSpinner.getValue(); // Auto
+        };
+
+        // Check if warning needed
+        int n = cellIndex.size();
+        if (n > 100000 && "Off".equals(subsampleMode.getValue())) {
+            var result = new Alert(Alert.AlertType.WARNING,
+                    String.format("You have %,d cells. UMAP without subsampling may be slow or run out of memory.\n\n" +
+                            "Recommended: Enable subsampling.", n),
+                    ButtonType.OK, ButtonType.CANCEL).showAndWait();
+            if (result.isEmpty() || result.get() == ButtonType.CANCEL) return;
+        }
+
+        computeButton.setDisable(true);
+        progressIndicator.setVisible(true);
+        statusLabel.setText("Computing UMAP...");
+
+        computeService.compute(cellIndex, params, maxCells);
+    }
+
+    private void onUmapComplete(UmapResult result) {
+        this.umapResult = result;
+        computeButton.setDisable(false);
+        progressIndicator.setVisible(false);
+
+        umapCanvas.setData(result.getUmapX(), result.getUmapY());
+        markerOverlay.setData(result.getUmapX(), result.getUmapY());
+
+        updatePhenotypeColors();
+        legend.update(result.getObjects(), populationTags);
+
+        statusLabel.setText(String.format("UMAP computed: %,d cells (k=%d)",
+                result.size(), result.getParams().k()));
+    }
+
+    private void onUmapError(String message) {
+        computeButton.setDisable(false);
+        progressIndicator.setVisible(false);
+        statusLabel.setText("Error: " + message);
+
+        new Alert(Alert.AlertType.ERROR, message, ButtonType.OK).showAndWait();
+    }
+
+    // --- Phenotype Coloring ---
+
+    private void updatePhenotypeColors() {
+        if (umapResult == null) return;
+
+        PathObject[] objects = umapResult.getObjects();
+        int n = objects.length;
+        int[] colors = new int[n];
+
+        for (int i = 0; i < n; i++) {
+            PathClass pc = objects[i].getPathClass();
+            if (pc != null) {
+                int c = pc.getColor();
+                // QuPath uses ARGB, extract RGB
+                int r = (c >> 16) & 0xFF;
+                int g = (c >> 8) & 0xFF;
+                int b = c & 0xFF;
+                colors[i] = (r << 16) | (g << 8) | b;
+            } else {
+                colors[i] = 0x808080;
+            }
+        }
+
+        umapCanvas.setPointColors(colors);
+    }
+
+    // --- Polygon Gating ---
+
+    private void onPolygonComplete(List<double[]> vertices) {
+        if (umapResult == null) return;
+
+        // Backup original classes
+        PathObject[] objects = umapResult.getObjects();
+        int n = objects.length;
+        originalClasses = new PathClass[n];
+        for (int i = 0; i < n; i++) {
+            originalClasses[i] = objects[i].getPathClass();
+        }
+
+        // Compute mask
+        boolean[] insideMask = polygonSelector.computeInsideMask(
+                umapResult.getUmapX(), umapResult.getUmapY());
+
+        // Apply UNFOCUSED to outside cells
+        PathClass unfocused = PathClass.fromString("UNFOCUSED", 0xFF505050);
+        int outsideCount = 0;
+        for (int i = 0; i < n; i++) {
+            if (!insideMask[i]) {
+                objects[i].setPathClass(unfocused);
+                outsideCount++;
+            }
+        }
+
+        // Update QuPath hierarchy
+        var imageData = qupath.getImageData();
+        if (imageData != null) {
+            imageData.getHierarchy().fireHierarchyChangedEvent(this);
+        }
+
+        // Update canvas colors
+        updatePhenotypeColors();
+
+        // Deactivate polygon drawing
+        polygonSelector.deactivate();
+        drawButton.setSelected(false);
+
+        int insideCount = n - outsideCount;
+        statusLabel.setText(String.format("Polygon: %,d inside / %,d unfocused",
+                insideCount, outsideCount));
+    }
+
+    private void clearPolygon() {
+        // Restore original classes
+        if (originalClasses != null && umapResult != null) {
+            PathObject[] objects = umapResult.getObjects();
+            for (int i = 0; i < objects.length; i++) {
+                if (originalClasses[i] != null) {
+                    objects[i].setPathClass(originalClasses[i]);
+                }
+            }
+            originalClasses = null;
+
+            var imageData = qupath.getImageData();
+            if (imageData != null) {
+                imageData.getHierarchy().fireHierarchyChangedEvent(this);
+            }
+        }
+
+        polygonSelector.clear();
+        polygonSelector.deactivate();
+        drawButton.setSelected(false);
+        updatePhenotypeColors();
+
+        if (umapResult != null) {
+            statusLabel.setText(String.format("UMAP: %,d cells", umapResult.size()));
+        }
+    }
+
+    // --- Population Tagging ---
+
+    private void applyPopulationTag() {
+        if (umapResult == null || polygonSelector.getVertices().size() < 3) {
+            statusLabel.setText("Draw a polygon first to select cells");
+            return;
+        }
+
+        String name = tagNameField.getText().trim();
+        if (name.isEmpty()) {
+            statusLabel.setText("Enter a population name");
+            return;
+        }
+
+        Color color = tagColorPicker.getValue();
+        int packedColor = ((int) (color.getRed() * 255) << 16)
+                | ((int) (color.getGreen() * 255) << 8)
+                | (int) (color.getBlue() * 255);
+
+        boolean[] insideMask = polygonSelector.computeInsideMask(
+                umapResult.getUmapX(), umapResult.getUmapY());
+
+        // Apply derived PathClass to cells inside the polygon
+        PathObject[] objects = umapResult.getObjects();
+        for (int i = 0; i < objects.length; i++) {
+            if (insideMask[i]) {
+                PathClass current = objects[i].getPathClass();
+                String baseName = current != null ? current.getName() : "Unclassified";
+                // Strip existing tag suffix if present
+                if (baseName.contains(": ")) {
+                    baseName = baseName.substring(0, baseName.indexOf(": "));
+                }
+                PathClass derived = PathClass.fromString(baseName + ": " + name,
+                        packedColor | 0xFF000000);
+                objects[i].setPathClass(derived);
+            }
+        }
+
+        // Create population tag
+        PopulationTag tag = new PopulationTag(name, packedColor, insideMask);
+        populationTags.add(tag);
+
+        // Update QuPath hierarchy
+        var imageData = qupath.getImageData();
+        if (imageData != null) {
+            imageData.getHierarchy().fireHierarchyChangedEvent(this);
+        }
+
+        // Update ring rendering
+        updatePopulationRings();
+
+        // Clear the polygon and restore non-tagged cells
+        if (originalClasses != null) {
+            for (int i = 0; i < objects.length; i++) {
+                if (!insideMask[i] && originalClasses[i] != null) {
+                    objects[i].setPathClass(originalClasses[i]);
+                }
+            }
+            originalClasses = null;
+        }
+
+        polygonSelector.clear();
+        polygonSelector.deactivate();
+        drawButton.setSelected(false);
+        updatePhenotypeColors();
+        legend.update(objects, populationTags);
+
+        if (imageData != null) {
+            imageData.getHierarchy().fireHierarchyChangedEvent(this);
+        }
+
+        statusLabel.setText(String.format("Tagged %,d cells as '%s'", tag.count(), name));
+    }
+
+    private void removePopulationTag(String tagName) {
+        PopulationTag tagToRemove = null;
+        for (PopulationTag tag : populationTags) {
+            if (tag.name().equals(tagName)) {
+                tagToRemove = tag;
+                break;
+            }
+        }
+        if (tagToRemove == null) return;
+
+        // Restore original PathClass (strip ": tagName" suffix)
+        PathObject[] objects = umapResult.getObjects();
+        boolean[] mask = tagToRemove.mask();
+        String suffix = ": " + tagName;
+        for (int i = 0; i < objects.length; i++) {
+            if (mask[i]) {
+                PathClass current = objects[i].getPathClass();
+                if (current != null && current.getName().endsWith(suffix)) {
+                    String baseName = current.getName().substring(0,
+                            current.getName().length() - suffix.length());
+                    objects[i].setPathClass(PathClass.fromString(baseName));
+                }
+            }
+        }
+
+        populationTags.remove(tagToRemove);
+        updatePopulationRings();
+        updatePhenotypeColors();
+        legend.update(objects, populationTags);
+
+        var imageData = qupath.getImageData();
+        if (imageData != null) {
+            imageData.getHierarchy().fireHierarchyChangedEvent(this);
+        }
+
+        statusLabel.setText(String.format("Removed tag '%s'", tagName));
+    }
+
+    private void updatePopulationRings() {
+        if (populationTags.isEmpty()) {
+            umapCanvas.setPopulationRings(null, null);
+            return;
+        }
+
+        List<int[]> colors = new ArrayList<>();
+        List<boolean[]> masks = new ArrayList<>();
+        for (PopulationTag tag : populationTags) {
+            colors.add(new int[]{tag.color()});
+            masks.add(tag.mask());
+        }
+        umapCanvas.setPopulationRings(colors, masks);
+    }
+
+    // --- Marker Overlay ---
+
+    private void onMarkerSelected() {
+        if (umapResult == null || cellIndex == null || markerStats == null) return;
+
+        String selected = markerDropdown.getValue();
+        if (selected == null || "-- none --".equals(selected)) {
+            hideMarkerOverlay();
+            return;
+        }
+
+        int idx = cellIndex.getMarkerIndex(selected);
+        if (idx < 0) return;
+
+        double[] rawValues = cellIndex.getMarkerValues(idx);
+        boolean useZScore = "Z-score".equals(colorScaleDropdown.getValue());
+
+        double[] displayValues;
+        MarkerOverlayCanvas.ColorScale scale;
+        if (useZScore) {
+            displayValues = new double[rawValues.length];
+            for (int i = 0; i < rawValues.length; i++) {
+                displayValues[i] = markerStats.toZScore(selected, rawValues[i]);
+            }
+            scale = MarkerOverlayCanvas.ColorScale.BLUE_WHITE_RED;
+        } else {
+            displayValues = rawValues;
+            scale = MarkerOverlayCanvas.ColorScale.VIRIDIS;
+        }
+
+        markerOverlay.setMarkerValues(displayValues, selected, scale);
+        colorScaleLegend.setScale(markerOverlay.getColorMin(), markerOverlay.getColorMax(),
+                scale, selected);
+
+        showMarkerOverlay();
+    }
+
+    private void showMarkerOverlay() {
+        if (!markerOverlayVisible) {
+            // Insert marker overlay before legend
+            var items = centerSplit.getItems();
+            if (items.size() == 2) {
+                items.add(1, markerOverlay);
+                centerSplit.setDividerPositions(0.45, 0.88);
+            }
+            markerOverlayVisible = true;
+        }
+    }
+
+    private void hideMarkerOverlay() {
+        if (markerOverlayVisible) {
+            centerSplit.getItems().remove(markerOverlay);
+            centerSplit.setDividerPositions(0.85);
+            markerOverlayVisible = false;
+            colorScaleLegend.clear();
+        }
+    }
+
+    // --- Export ---
+
+    private void exportCsv() {
+        if (umapResult == null) {
+            statusLabel.setText("No UMAP data to export");
+            return;
+        }
+
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Export UMAP Coordinates");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV Files", "*.csv"));
+        chooser.setInitialFileName("umap_coordinates.csv");
+        File file = chooser.showSaveDialog(getScene().getWindow());
+
+        if (file != null) {
+            try {
+                umapResult.exportToCsv(file);
+                statusLabel.setText("Exported to " + file.getName());
+            } catch (Exception e) {
+                statusLabel.setText("Export failed: " + e.getMessage());
+            }
+        }
+    }
+
+    // --- Lifecycle ---
+
+    public void shutdown() {
+        computeService.shutdown();
+    }
+}
