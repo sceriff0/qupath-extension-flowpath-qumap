@@ -103,11 +103,12 @@ public class UmapComputeService {
                 }
 
                 // Clamp k to dataset size (NN-descent requires k < n)
+                final int finalComputeN = computeN;
                 int effectiveK = Math.min(params.k(), computeN - 1);
                 if (effectiveK < 2) {
                     Platform.runLater(() -> {
                         if (onError != null) onError.accept(
-                                "Too few cells (%d) for UMAP. Need at least %d.".formatted(computeN, params.k() + 1));
+                                "Too few cells (%d) for UMAP. Need at least %d.".formatted(finalComputeN, params.k() + 1));
                     });
                     return;
                 }

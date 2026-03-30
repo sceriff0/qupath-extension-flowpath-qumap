@@ -41,8 +41,8 @@ class UmapParametersTest {
     }
 
     @Test
-    void minDistMustBePositive() {
-        assertThrows(IllegalArgumentException.class, () -> new UmapParameters(15, 0.0, 1.0, 200));
+    void minDistMustBeNonNegative() {
+        assertDoesNotThrow(() -> new UmapParameters(15, 0.0, 1.0, 200));
         assertThrows(IllegalArgumentException.class, () -> new UmapParameters(15, -0.1, 1.0, 200));
     }
 
