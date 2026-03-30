@@ -95,10 +95,9 @@ public class UmapComputeService {
 
                 // Run UMAP
                 postStatus("Computing UMAP (k=%d, epochs=%d)...".formatted(params.k(), params.epochs()));
-                var umap = UMAP.of(matrix, params.k(), 2,
-                        params.epochs(), 1.0, params.minDist(), params.spread(),
-                        5, 1.0);
-                double[][] embedding = umap.coordinates;
+                var options = new UMAP.Options(params.k(), 2, params.epochs(),
+                        1.0, params.minDist(), params.spread(), 5, 1.0, 1.0);
+                double[][] embedding = UMAP.fit(matrix, options);
 
                 // Build result arrays
                 double[] umapX = new double[n];

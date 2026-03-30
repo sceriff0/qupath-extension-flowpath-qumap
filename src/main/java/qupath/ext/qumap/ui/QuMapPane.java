@@ -272,7 +272,13 @@ public class QuMapPane extends BorderPane {
             return;
         }
 
-        var detections = imageData.getHierarchy().getDetectionObjects();
+        var detections = imageData.getHierarchy().getDetectionObjects()
+                .stream()
+                .filter(d -> {
+                    var pc = d.getPathClass();
+                    return pc == null || !"Excluded".equals(pc.getName());
+                })
+                .toList();
         if (detections.isEmpty()) {
             statusLabel.setText("No cell detections found");
             return;

@@ -6,7 +6,7 @@
 
 UMAP dimensionality reduction and visualization for [QuPath](https://qupath.github.io/). Explore cell populations in embedding space, color by phenotype, select subsets with interactive polygons, and overlay marker expression — all on multiplexed imaging data (CODEX, MIBI, mIF).
 
-Part of the [FlowPath extension suite](https://github.com/sceriff0/flowpath-catalog). Works alongside [FlowPath - GatingTree](https://github.com/sceriff0/qupath-extension-flowpath) for a complete phenotyping workflow.
+Part of the [FlowPath extension suite](https://github.com/sceriff0/flowpath-catalog). Works alongside [FlowPath - GatingTree](https://github.com/sceriff0/qupath-extension-flowpath-gatingtree) for a complete phenotyping workflow.
 
 <!-- Add screenshots here -->
 
@@ -40,8 +40,8 @@ Download the latest JAR from [Releases](../../releases) and drag it onto QuPath.
 ### Build from Source
 
 ```bash
-git clone https://github.com/sceriff0/qupath-extension-qumap.git
-cd qupath-extension-qumap
+git clone https://github.com/sceriff0/qupath-extension-flowpath-qumap.git
+cd qupath-extension-flowpath-qumap
 ./gradlew build
 # JAR at build/libs/FlowPath.-.qUMAP-0.1.0-all.jar -> drag onto QuPath
 ```
@@ -98,7 +98,7 @@ The UMAP algorithm:
 
 If you use this tool in your research, please cite:
 
-> FlowPath - qUMAP: UMAP dimensionality reduction and visualization for QuPath. (2026). https://github.com/sceriff0/qupath-extension-qumap
+> FlowPath - qUMAP: UMAP dimensionality reduction and visualization for QuPath. (2026). https://github.com/sceriff0/qupath-extension-flowpath-qumap
 
 ## License
 

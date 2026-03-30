@@ -6,7 +6,7 @@ plugins {
 qupathExtension {
     name = "FlowPath - qUMAP"
     group = "io.github.qupath"
-    version = "0.5.0"
+    version = "0.6.0"
     description = "UMAP dimensionality reduction and visualization for multiplexed imaging data."
     automaticModule = "qupath.ext.qumap"
 }
@@ -17,7 +17,7 @@ dependencies {
     shadow(libs.qupath.fxtras)
 
     // SMILE UMAP - bundled into fat JAR (exclude native BLAS binaries to reduce size)
-    implementation("com.github.haifengl:smile-core:3.1.1") {
+    implementation("com.github.haifengl:smile-core:4.3.0") {
         exclude(group = "org.bytedeco")
         exclude(group = "com.epam")
         exclude(group = "org.apache.commons", module = "commons-csv")
