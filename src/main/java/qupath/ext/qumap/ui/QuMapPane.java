@@ -4,6 +4,7 @@ import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
+import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
@@ -68,6 +69,9 @@ public class QuMapPane extends BorderPane {
     private javafx.beans.value.ChangeListener<ImageData<?>> imageDataListener;
     private long computeStartTime;
 
+    // Progress dialog
+    private UmapProgressDialog progressDialog;
+
     // Marker overlay visibility
     private final SplitPane centerSplit;
     private boolean markerOverlayVisible = false;
@@ -93,9 +97,10 @@ public class QuMapPane extends BorderPane {
         qualityPreset.setValue("Fast");
         qualityPreset.setPrefWidth(90);
         qualityPreset.setTooltip(new Tooltip(
-                "Fast: quick preview (k=10, 50 epochs)\n" +
-                "Balanced: good quality (k=15, 100 epochs)\n" +
-                "Quality: publication-ready (k=15, 200 epochs)"));
+                "Fast: quick preview, good for exploration\n" +
+                "Balanced: good quality for most analyses\n" +
+                "Quality: publication-ready, slower\n" +
+                "Custom: manually tune all parameters"));
         qualityPreset.setOnAction(e -> applyPreset(qualityPreset.getValue()));
 
         kSpinner = new Spinner<>(5, 50, 10, 5);
@@ -206,18 +211,34 @@ public class QuMapPane extends BorderPane {
 
         // --- Layout ---
 
-        // Toolbar row 1
-        var row1 = new HBox(6,
-                computeButton, cancelButton, progressIndicator,
-                qualityPreset,
+        // Advanced controls — hidden unless "Custom" preset
+        var advancedParams = new HBox(6,
                 new Label("k:"), kSpinner,
                 new Label("Epochs:"), epochsSpinner,
-                new Label("Dot:"), dotSizeSpinner,
                 new Separator(Orientation.VERTICAL),
                 new Label("Subsample:"), subsampleMode,
                 new Label("Max:"), maxCellsSpinner
         );
+        advancedParams.setAlignment(Pos.CENTER_LEFT);
+        advancedParams.setVisible(false);
+        advancedParams.setManaged(false);
+
+        // Show/hide advanced controls based on preset
+        qualityPreset.valueProperty().addListener((obs, oldVal, newVal) -> {
+            boolean show = "Custom".equals(newVal);
+            advancedParams.setVisible(show);
+            advancedParams.setManaged(show);
+        });
+
+        // Toolbar row 1
+        var row1 = new HBox(6,
+                computeButton, cancelButton, progressIndicator,
+                qualityPreset,
+                advancedParams,
+                new Label("Dot:"), dotSizeSpinner
+        );
         row1.setPadding(new Insets(4));
+        row1.setAlignment(Pos.CENTER_LEFT);
 
         // Toolbar row 2
         var row2 = new HBox(6,
@@ -230,6 +251,7 @@ public class QuMapPane extends BorderPane {
                 exportButton
         );
         row2.setPadding(new Insets(4));
+        row2.setAlignment(Pos.CENTER_LEFT);
 
         var toolbar = new VBox(row1, row2);
         toolbar.setStyle("-fx-background-color: #333;");
@@ -252,7 +274,10 @@ public class QuMapPane extends BorderPane {
         // --- Callbacks ---
         computeService.setOnComplete(this::onUmapComplete);
         computeService.setOnError(this::onUmapError);
-        computeService.setOnStatusUpdate(s -> statusLabel.setText(s));
+        computeService.setOnStatusUpdate(s -> {
+            statusLabel.setText(s);
+            if (progressDialog != null) progressDialog.updateStatus(s);
+        });
 
         polygonSelector.setOnPolygonComplete(this::onPolygonComplete);
 
@@ -297,6 +322,11 @@ public class QuMapPane extends BorderPane {
     // --- Initialization ---
 
     private void initializeFromImage() {
+        // Tear down any running computation cleanly
+        if (progressDialog != null) { progressDialog.close(); progressDialog = null; }
+        cancelButton.setVisible(false);
+        cancelButton.setManaged(false);
+        progressIndicator.setVisible(false);
         computeService.cancel();
         umapResult = null;
         cellIndex = null;
@@ -519,6 +549,13 @@ public class QuMapPane extends BorderPane {
         computeStartTime = System.currentTimeMillis();
         statusLabel.setText("Computing UMAP...");
 
+        // Show progress dialog
+        if (progressDialog != null) progressDialog.close();
+        javafx.stage.Window owner = getScene() != null ? getScene().getWindow() : null;
+        progressDialog = new UmapProgressDialog(owner);
+        progressDialog.setOnCancel(this::cancelUmap);
+        progressDialog.show();
+
         computeService.compute(cellIndex, params, maxCells);
     }
 
@@ -528,6 +565,7 @@ public class QuMapPane extends BorderPane {
         cancelButton.setVisible(false);
         cancelButton.setManaged(false);
         progressIndicator.setVisible(false);
+        if (progressDialog != null) { progressDialog.close(); progressDialog = null; }
         statusLabel.setText("UMAP cancelled");
     }
 
@@ -537,6 +575,7 @@ public class QuMapPane extends BorderPane {
         cancelButton.setVisible(false);
         cancelButton.setManaged(false);
         progressIndicator.setVisible(false);
+        if (progressDialog != null) { progressDialog.close(); progressDialog = null; }
 
         // Enable gating and export controls
         drawButton.setDisable(false);
@@ -564,6 +603,7 @@ public class QuMapPane extends BorderPane {
         cancelButton.setVisible(false);
         cancelButton.setManaged(false);
         progressIndicator.setVisible(false);
+        if (progressDialog != null) { progressDialog.close(); progressDialog = null; }
         statusLabel.setText("Error: " + message);
 
         new Alert(Alert.AlertType.ERROR, message, ButtonType.OK).showAndWait();

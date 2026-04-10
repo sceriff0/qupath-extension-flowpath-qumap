@@ -262,7 +262,8 @@ public class UmapComputeService {
 
     /**
      * Project non-sampled cells by finding their k nearest neighbors among the sampled cells
-     * and averaging those neighbors' UMAP coordinates weighted by inverse distance.
+     * (using a KD-tree for fast lookup) and averaging those neighbors' UMAP coordinates
+     * weighted by inverse distance.
      */
     private void projectRemaining(CellIndex cellIndex, int[] sampleIndices,
                                   double[][] sampleEmbedding,
@@ -276,8 +277,7 @@ public class UmapComputeService {
         boolean[] isSampled = new boolean[n];
         for (int idx : sampleIndices) isSampled[idx] = true;
 
-        // Pre-fetch all marker arrays once (avoid repeated cloning)
-        // Use the same imputation means from extractSubMatrix for consistency
+        // Pre-fetch all marker arrays once
         double[][] allMarkerValues = new double[m][];
         for (int j = 0; j < m; j++) {
             allMarkerValues[j] = cellIndex.getMarkerValues(j);
@@ -291,6 +291,10 @@ public class UmapComputeService {
                 sampleMarkers[s][j] = Double.isNaN(v) ? imputationMeans[j] : v;
             }
         }
+
+        // Build KD-tree for fast nearest-neighbor queries
+        postStatus("Building spatial index for projection...");
+        KDTree tree = new KDTree(sampleMarkers);
 
         // Pre-compute query vectors for all non-sampled cells (NaN imputed)
         int remaining = 0;
@@ -309,7 +313,7 @@ public class UmapComputeService {
             qi++;
         }
 
-        // Parallel kNN projection — each query is independent
+        // Parallel kNN projection using KD-tree — each query is independent
         final int totalRemaining = remaining;
         final int progressStep = Math.max(1, remaining / 10);
         AtomicInteger progressCount = new AtomicInteger(0);
@@ -317,42 +321,27 @@ public class UmapComputeService {
         IntStream.range(0, remaining).parallel().forEach(q -> {
             if (cancelled) return;
 
-            // Find k nearest neighbors in sample
-            double[] dists = new double[knn];
+            // KD-tree kNN query (returns squared distances)
             int[] neighbors = new int[knn];
-            Arrays.fill(dists, Double.MAX_VALUE);
-
-            for (int s = 0; s < sampleIndices.length; s++) {
-                if (s % 256 == 0 && cancelled) return;
-                double dist = 0;
-                for (int j = 0; j < m; j++) {
-                    double d = queryVectors[q][j] - sampleMarkers[s][j];
-                    dist += d * d;
-                }
-
-                // Insert if closer than worst
-                int worstIdx = 0;
-                for (int ki = 1; ki < knn; ki++) {
-                    if (dists[ki] > dists[worstIdx]) worstIdx = ki;
-                }
-                if (dist < dists[worstIdx]) {
-                    dists[worstIdx] = dist;
-                    neighbors[worstIdx] = s;
-                }
-            }
+            double[] dists = new double[knn];
+            tree.kNearest(queryVectors[q], knn, neighbors, dists);
 
             // Weighted average of neighbor embeddings
             double totalWeight = 0;
             double wx = 0, wy = 0;
             for (int ki = 0; ki < knn; ki++) {
+                if (neighbors[ki] < 0) continue; // unfilled slot
                 double w = 1.0 / (Math.sqrt(dists[ki]) + 1e-10);
                 wx += w * sampleEmbedding[neighbors[ki]][0];
                 wy += w * sampleEmbedding[neighbors[ki]][1];
                 totalWeight += w;
             }
             int ci = queryIndices[q];
-            umapX[ci] = wx / totalWeight;
-            umapY[ci] = wy / totalWeight;
+            if (totalWeight > 0) {
+                umapX[ci] = wx / totalWeight;
+                umapY[ci] = wy / totalWeight;
+            }
+            // else: leave at 0.0 (no valid neighbors found)
 
             // Progress update every ~10%
             int done = progressCount.incrementAndGet();
