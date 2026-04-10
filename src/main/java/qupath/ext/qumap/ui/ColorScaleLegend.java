@@ -16,6 +16,7 @@ public class ColorScaleLegend extends Canvas {
     private double maxValue;
     private MarkerOverlayCanvas.ColorScale colorScale;
     private String label;
+    private String scaleType;
 
     public ColorScaleLegend() {
         super(30, 200);
@@ -39,10 +40,15 @@ public class ColorScaleLegend extends Canvas {
     }
 
     public void setScale(double min, double max, MarkerOverlayCanvas.ColorScale scale, String label) {
+        setScale(min, max, scale, label, null);
+    }
+
+    public void setScale(double min, double max, MarkerOverlayCanvas.ColorScale scale, String label, String scaleType) {
         this.minValue = min;
         this.maxValue = max;
         this.colorScale = scale;
         this.label = label;
+        this.scaleType = scaleType;
         repaint();
     }
 
@@ -80,11 +86,25 @@ public class ColorScaleLegend extends Canvas {
         gc.setLineWidth(0.5);
         gc.strokeRect(barX, barTop, barW, barH);
 
-        // Labels
+        // Marker name above gradient
+        if (label != null) {
+            gc.setFont(Font.font(7));
+            gc.setFill(Color.gray(0.6));
+            gc.fillText(label, barX, barTop - 4);
+        }
+
+        // Value labels
         gc.setFill(Color.gray(0.7));
         gc.setFont(Font.font(8));
         gc.fillText(String.format(Locale.US, "%.1f", maxValue), barX + barW + 2, barTop + 8);
         gc.fillText(String.format(Locale.US, "%.1f", minValue), barX + barW + 2, barBottom);
+
+        // Scale type label (below gradient)
+        if (scaleType != null) {
+            gc.setFont(Font.font(7));
+            gc.setFill(Color.gray(0.5));
+            gc.fillText(scaleType, barX, barBottom + 12);
+        }
     }
 
     private Color mapColor(double t) {

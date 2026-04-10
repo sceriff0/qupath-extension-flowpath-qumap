@@ -5,6 +5,8 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
+import java.util.Arrays;
+
 /**
  * Canvas-based 2D scatter plot for marker expression overlay on UMAP.
  * Colors points by z-score or raw intensity using a continuous color scale.
@@ -88,17 +90,18 @@ public class MarkerOverlayCanvas extends Canvas {
         this.colorScale = scale;
 
         if (values != null && values.length > 0) {
-            colorMin = Double.MAX_VALUE;
-            colorMax = -Double.MAX_VALUE;
-            for (double v : values) {
-                if (Double.isFinite(v)) {
-                    colorMin = Math.min(colorMin, v);
-                    colorMax = Math.max(colorMax, v);
-                }
+            // Use 1st-99th percentile to avoid outlier compression
+            double[] finite = Arrays.stream(values)
+                    .filter(Double::isFinite)
+                    .sorted()
+                    .toArray();
+            if (finite.length == 0) {
+                colorMin = 0; colorMax = 1;
+            } else {
+                colorMin = finite[Math.max(0, (int) (finite.length * 0.01))];
+                colorMax = finite[Math.min(finite.length - 1, (int) (finite.length * 0.99))];
+                if (colorMax <= colorMin) colorMax = colorMin + 1;
             }
-            // If no finite values found, use a safe default range
-            if (colorMin == Double.MAX_VALUE) { colorMin = 0; colorMax = 1; }
-            else if (colorMax <= colorMin) colorMax = colorMin + 1;
         }
         repaint();
     }

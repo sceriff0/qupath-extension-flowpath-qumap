@@ -15,9 +15,11 @@ import qupath.lib.gui.QuPathGUI;
 import qupath.lib.images.ImageData;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.classes.PathClass;
+import qupath.lib.roi.interfaces.ROI;
 
 import java.io.File;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Main panel for the qUMAP extension.
@@ -63,6 +65,7 @@ public class QuMapPane extends BorderPane {
     private final Button clearButton;
     private final Button applyTagButton;
     private final Button exportButton;
+    private final CheckBox roiFilterCheckBox;
 
     // Current preset negative samples (not exposed as spinner — controlled by preset)
     private int negativeSamples = 3;
@@ -163,6 +166,11 @@ public class QuMapPane extends BorderPane {
                 "Raw: actual measurement values."));
         colorScaleDropdown.setOnAction(e -> onMarkerSelected());
 
+        roiFilterCheckBox = new CheckBox("Filter by annotations");
+        roiFilterCheckBox.setTooltip(new Tooltip(
+                "Only include cells inside annotation ROIs.\nDraw annotations in QuPath first, then check this box."));
+        roiFilterCheckBox.selectedProperty().addListener((obs, o, n) -> initializeFromImage());
+
         computeButton = new Button("Compute UMAP");
         computeButton.setTooltip(new Tooltip("Run UMAP dimensionality reduction on cell data."));
         computeButton.setOnAction(e -> runUmap());
@@ -173,7 +181,7 @@ public class QuMapPane extends BorderPane {
         cancelButton.setManaged(false);
 
         drawButton = new ToggleButton("Draw Polygon");
-        drawButton.setTooltip(new Tooltip("Click to draw a polygon gate on the UMAP plot.\nClick points to create vertices, close the shape to finish."));
+        drawButton.setTooltip(new Tooltip("Draw a polygon gate on the UMAP plot.\nClick to add vertices, double-click to close.\nDrag vertices to adjust the shape."));
         drawButton.setOnAction(e -> {
             if (drawButton.isSelected()) {
                 polygonSelector.activate();
@@ -187,18 +195,22 @@ public class QuMapPane extends BorderPane {
         clearButton.setOnAction(e -> clearPolygon());
 
         tagNameField = new TextField();
-        tagNameField.setPromptText("Population name");
-        tagNameField.setPrefWidth(100);
+        tagNameField.setPromptText("e.g. CD4+ T cells");
+        tagNameField.setPrefWidth(120);
+        tagNameField.setTooltip(new Tooltip(
+                "Name for the gated population.\nCells inside the polygon get this label in QuPath."));
 
         tagColorPicker = new ColorPicker(Color.ORANGE);
         tagColorPicker.setPrefWidth(50);
 
-        applyTagButton = new Button("Apply Tag");
-        applyTagButton.setTooltip(new Tooltip("Label gated cells with the population name.\nCells are tagged in QuPath's hierarchy."));
+        applyTagButton = new Button("Tag Selection");
+        applyTagButton.setTooltip(new Tooltip(
+                "Label polygon-selected cells as a named population.\nAdds a classification suffix in QuPath's hierarchy."));
         applyTagButton.setOnAction(e -> applyPopulationTag());
 
-        exportButton = new Button("Export CSV");
-        exportButton.setTooltip(new Tooltip("Export UMAP coordinates and marker data to CSV. (Ctrl+E)"));
+        exportButton = new Button("Export Data");
+        exportButton.setTooltip(new Tooltip(
+                "Export UMAP coordinates, markers, and population tags to CSV.\nIncludes all cells. (Ctrl+E)"));
         exportButton.setOnAction(e -> exportCsv());
 
         // Disable gating/tag/export controls until UMAP is computed
@@ -233,9 +245,10 @@ public class QuMapPane extends BorderPane {
         // Toolbar row 1
         var row1 = new HBox(6,
                 computeButton, cancelButton, progressIndicator,
+                roiFilterCheckBox,
                 qualityPreset,
                 advancedParams,
-                new Label("Dot:"), dotSizeSpinner
+                new Label("Dot size:"), dotSizeSpinner
         );
         row1.setPadding(new Insets(4));
         row1.setAlignment(Pos.CENTER_LEFT);
@@ -246,7 +259,7 @@ public class QuMapPane extends BorderPane {
                 new Separator(Orientation.VERTICAL),
                 drawButton, clearButton,
                 new Separator(Orientation.VERTICAL),
-                new Label("Tag:"), tagNameField, tagColorPicker, applyTagButton,
+                new Label("Population:"), tagNameField, tagColorPicker, applyTagButton,
                 new Separator(Orientation.VERTICAL),
                 exportButton
         );
@@ -361,9 +374,30 @@ public class QuMapPane extends BorderPane {
                     var pc = d.getPathClass();
                     return pc == null || !"Excluded".equals(pc.getName());
                 })
-                .toList();
+                .collect(Collectors.toCollection(ArrayList::new));
+
+        // Filter by annotation ROIs if enabled
+        if (roiFilterCheckBox.isSelected()) {
+            List<ROI> rois = imageData.getHierarchy().getAnnotationObjects()
+                    .stream()
+                    .map(PathObject::getROI)
+                    .filter(Objects::nonNull)
+                    .toList();
+            if (!rois.isEmpty()) {
+                detections.removeIf(d -> {
+                    ROI cellRoi = d.getROI();
+                    if (cellRoi == null) return true;
+                    double cx = cellRoi.getCentroidX();
+                    double cy = cellRoi.getCentroidY();
+                    return rois.stream().noneMatch(roi -> roi.contains(cx, cy));
+                });
+            }
+        }
+
         if (detections.isEmpty()) {
-            statusLabel.setText("No cell detections found");
+            statusLabel.setText(roiFilterCheckBox.isSelected()
+                    ? "No cell detections found inside annotations"
+                    : "No cell detections found");
             return;
         }
 
@@ -577,12 +611,9 @@ public class QuMapPane extends BorderPane {
         progressIndicator.setVisible(false);
         if (progressDialog != null) { progressDialog.close(); progressDialog = null; }
 
-        // Enable gating and export controls
+        // Enable gating and export controls (tag controls stay disabled until polygon is drawn)
         drawButton.setDisable(false);
         clearButton.setDisable(false);
-        tagNameField.setDisable(false);
-        tagColorPicker.setDisable(false);
-        applyTagButton.setDisable(false);
         exportButton.setDisable(false);
 
         umapCanvas.setData(result.getUmapX(), result.getUmapY());
@@ -640,12 +671,20 @@ public class QuMapPane extends BorderPane {
     private void onPolygonComplete(List<double[]> vertices) {
         if (umapResult == null) return;
 
-        // Backup original classes
         PathObject[] objects = umapResult.getObjects();
         int n = objects.length;
-        originalClasses = new PathClass[n];
+
+        // Backup original classes only on first polygon close (not on handle drag)
+        if (originalClasses == null) {
+            originalClasses = new PathClass[n];
+            for (int i = 0; i < n; i++) {
+                originalClasses[i] = objects[i].getPathClass();
+            }
+        }
+
+        // Restore all cells from backup before recomputing
         for (int i = 0; i < n; i++) {
-            originalClasses[i] = objects[i].getPathClass();
+            objects[i].setPathClass(originalClasses[i]);
         }
 
         // Compute mask
@@ -671,9 +710,10 @@ public class QuMapPane extends BorderPane {
         // Update canvas colors
         updatePhenotypeColors();
 
-        // Deactivate polygon drawing
-        polygonSelector.deactivate();
-        drawButton.setSelected(false);
+        // Enable tag controls (polygon is now drawn)
+        tagNameField.setDisable(false);
+        tagColorPicker.setDisable(false);
+        applyTagButton.setDisable(false);
 
         int insideCount = n - outsideCount;
         statusLabel.setText(String.format("Polygon: %,d inside / %,d unfocused",
@@ -698,7 +738,13 @@ public class QuMapPane extends BorderPane {
         polygonSelector.clear();
         polygonSelector.deactivate();
         drawButton.setSelected(false);
+        umapCanvas.setPolygonCompleted(false);
         updatePhenotypeColors();
+
+        // Disable tag controls until next polygon
+        tagNameField.setDisable(true);
+        tagColorPicker.setDisable(true);
+        applyTagButton.setDisable(true);
 
         if (umapResult != null) {
             statusLabel.setText(String.format("UMAP: %,d cells", umapResult.size()));
@@ -873,8 +919,9 @@ public class QuMapPane extends BorderPane {
         }
 
         markerOverlay.setMarkerValues(displayValues, selected, scale);
+        String scaleLabel = useZScore ? "Z-score" : "Raw";
         colorScaleLegend.setScale(markerOverlay.getColorMin(), markerOverlay.getColorMax(),
-                scale, selected);
+                scale, selected, scaleLabel);
 
         showMarkerOverlay();
     }

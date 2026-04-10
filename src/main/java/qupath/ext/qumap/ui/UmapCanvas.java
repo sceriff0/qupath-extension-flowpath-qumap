@@ -40,6 +40,8 @@ public class UmapCanvas extends Canvas {
 
     // Polygon overlay
     private List<double[]> polygonVertices;
+    private boolean polygonCompleted = false;
+    private static final double HANDLE_RADIUS = 6.0;
 
     // View change listener
     private Runnable onViewChanged;
@@ -197,6 +199,12 @@ public class UmapCanvas extends Canvas {
 
     public void clearPolygonOverlay() {
         this.polygonVertices = null;
+        this.polygonCompleted = false;
+        repaint();
+    }
+
+    public void setPolygonCompleted(boolean completed) {
+        this.polygonCompleted = completed;
         repaint();
     }
 
@@ -328,9 +336,10 @@ public class UmapCanvas extends Canvas {
 
         // Draw polygon overlay
         if (polygonVertices != null && polygonVertices.size() >= 2) {
-            gc.setStroke(Color.YELLOW);
-            gc.setLineWidth(1.5);
-            if (polygonVertices.size() >= 3) {
+            if (polygonCompleted && polygonVertices.size() >= 3) {
+                // Completed: solid yellow outline + white/yellow handles (FlowPath style)
+                gc.setStroke(Color.YELLOW);
+                gc.setLineWidth(1.5);
                 double[] xp = new double[polygonVertices.size()];
                 double[] yp = new double[polygonVertices.size()];
                 for (int i = 0; i < polygonVertices.size(); i++) {
@@ -338,22 +347,39 @@ public class UmapCanvas extends Canvas {
                     yp[i] = dataYToScreenY(polygonVertices.get(i)[1]);
                 }
                 gc.strokePolygon(xp, yp, xp.length);
-            } else {
-                // Just 2 points: draw a line
-                gc.strokeLine(
-                    dataXToScreenX(polygonVertices.get(0)[0]),
-                    dataYToScreenY(polygonVertices.get(0)[1]),
-                    dataXToScreenX(polygonVertices.get(1)[0]),
-                    dataYToScreenY(polygonVertices.get(1)[1])
-                );
-            }
 
-            // Vertex handles
-            gc.setFill(Color.CYAN);
-            for (double[] v : polygonVertices) {
-                double sx = dataXToScreenX(v[0]);
-                double sy = dataYToScreenY(v[1]);
-                gc.fillOval(sx - 4, sy - 4, 8, 8);
+                // White-filled, yellow-stroked handles
+                for (int i = 0; i < xp.length; i++) {
+                    gc.setFill(Color.WHITE);
+                    gc.setStroke(Color.YELLOW);
+                    gc.setLineWidth(1.0);
+                    gc.fillOval(xp[i] - HANDLE_RADIUS, yp[i] - HANDLE_RADIUS,
+                            HANDLE_RADIUS * 2, HANDLE_RADIUS * 2);
+                    gc.strokeOval(xp[i] - HANDLE_RADIUS, yp[i] - HANDLE_RADIUS,
+                            HANDLE_RADIUS * 2, HANDLE_RADIUS * 2);
+                }
+                gc.setLineWidth(1.5);
+            } else {
+                // Drawing preview: dashed cyan lines + cyan circles
+                gc.setStroke(Color.CYAN);
+                gc.setLineWidth(1.5);
+                gc.setLineDashes(6, 4);
+                for (int i = 0; i < polygonVertices.size() - 1; i++) {
+                    gc.strokeLine(
+                        dataXToScreenX(polygonVertices.get(i)[0]),
+                        dataYToScreenY(polygonVertices.get(i)[1]),
+                        dataXToScreenX(polygonVertices.get(i + 1)[0]),
+                        dataYToScreenY(polygonVertices.get(i + 1)[1])
+                    );
+                }
+                gc.setLineDashes(null);
+
+                gc.setFill(Color.CYAN);
+                for (double[] v : polygonVertices) {
+                    double sx = dataXToScreenX(v[0]);
+                    double sy = dataYToScreenY(v[1]);
+                    gc.fillOval(sx - 4, sy - 4, 8, 8);
+                }
             }
         }
 
