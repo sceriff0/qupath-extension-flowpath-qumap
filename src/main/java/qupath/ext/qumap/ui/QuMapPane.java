@@ -771,13 +771,11 @@ public class QuMapPane extends BorderPane {
                 | ((int) (color.getGreen() * 255) << 8)
                 | (int) (color.getBlue() * 255);
 
-        // Derive inside mask from UNFOCUSED state (polygon vertices are already cleared)
+        // Derive inside mask from the polygon geometry (not from PathClass state,
+        // which may have been modified by previous tagging operations)
         PathObject[] objects = umapResult.getObjects();
-        boolean[] insideMask = new boolean[objects.length];
-        for (int i = 0; i < objects.length; i++) {
-            PathClass pc = objects[i].getPathClass();
-            insideMask[i] = pc == null || !"UNFOCUSED".equals(pc.getName());
-        }
+        boolean[] insideMask = polygonSelector.computeInsideMask(
+                umapResult.getUmapX(), umapResult.getUmapY());
 
         // Apply derived PathClass to cells inside the polygon, preserving phenotype color
         for (int i = 0; i < objects.length; i++) {

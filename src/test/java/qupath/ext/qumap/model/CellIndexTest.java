@@ -112,9 +112,7 @@ class CellIndexTest {
         var c1 = createCell();
         var c2 = createCell();
         var c3 = createCell();
-        // CD45: 2, NaN(missing=0), 4 -> but missing returns 0.0 not NaN from findMarkerValue
-        // To test NaN replacement, we need actual NaN in values
-        // Since findMarkerValue returns 0.0 for missing, test with all-present values
+        // Test with all-present values to verify basic matrix construction
         c1.getMeasurements().put("CD45", 2.0);
         c2.getMeasurements().put("CD45", 4.0);
         c3.getMeasurements().put("CD45", 6.0);

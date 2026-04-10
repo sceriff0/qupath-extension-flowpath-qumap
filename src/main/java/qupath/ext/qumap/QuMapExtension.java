@@ -51,11 +51,14 @@ public class QuMapExtension implements QuPathExtension {
         stage.setMinHeight(600);
 
         stage.setOnCloseRequest(e -> {
-            if (quMapPane != null) {
-                quMapPane.shutdown();
+            try {
+                if (quMapPane != null) {
+                    quMapPane.shutdown();
+                }
+            } finally {
+                quMapPane = null;
+                stage = null;
             }
-            quMapPane = null;
-            stage = null;
         });
 
         stage.show();

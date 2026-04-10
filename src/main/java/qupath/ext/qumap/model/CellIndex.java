@@ -74,7 +74,7 @@ public class CellIndex {
                 return entry.getValue().doubleValue();
             }
         }
-        return 0.0;
+        return Double.NaN;
     }
 
     private static double findMeasurement(Map<String, Number> measurements, String key) {

@@ -75,7 +75,7 @@ public class ColorScaleLegend extends Canvas {
         if (barH <= 0) return;
 
         // Draw gradient bar (top = max, bottom = min)
-        for (int y = 0; y < (int) barH; y++) {
+        for (int y = 0; y <= (int) barH; y++) {
             double t = 1.0 - (double) y / barH; // top=1, bottom=0
             gc.setFill(mapColor(t));
             gc.fillRect(barX, barTop + y, barW, 1);

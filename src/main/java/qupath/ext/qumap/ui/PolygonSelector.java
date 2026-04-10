@@ -92,9 +92,8 @@ public class PolygonSelector {
 
         // Drawing mode
         if (e.getClickCount() == 2) {
-            // Remove the spurious vertex added by the preceding single-click event
-            if (!vertices.isEmpty()) vertices.remove(vertices.size() - 1);
-            // Complete polygon
+            // The preceding single-click event already added a vertex at this location.
+            // Keep it — the user intended to place this point and close the polygon.
             if (vertices.size() >= 3 && onPolygonComplete != null) {
                 completed = true;
                 canvas.setPolygonCompleted(true);
@@ -154,7 +153,8 @@ public class PolygonSelector {
         if (vertices.size() < 3) return mask;
 
         for (int i = 0; i < n; i++) {
-            mask[i] = UmapCanvas.pointInPolygon(umapX[i], umapY[i], vertices);
+            mask[i] = Double.isFinite(umapX[i]) && Double.isFinite(umapY[i])
+                    && UmapCanvas.pointInPolygon(umapX[i], umapY[i], vertices);
         }
         return mask;
     }

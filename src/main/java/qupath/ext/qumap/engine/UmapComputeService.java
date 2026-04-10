@@ -52,9 +52,9 @@ public class UmapComputeService {
      * @param maxCells    maximum cells before subsampling (0 = no limit)
      */
     public void compute(CellIndex cellIndex, UmapParameters params, int maxCells) {
+        final int myGeneration = generation.incrementAndGet();
         cancel();
         cancelled = false;
-        final int myGeneration = generation.incrementAndGet();
 
         runningTask = executor.submit(() -> {
             try {
@@ -108,7 +108,7 @@ public class UmapComputeService {
                 if (effectiveK < 2) {
                     Platform.runLater(() -> {
                         if (onError != null) onError.accept(
-                                "Too few cells (%d) for UMAP. Need at least %d.".formatted(finalComputeN, params.k() + 1));
+                                "Too few cells (%d) for UMAP. Need at least 3.".formatted(finalComputeN));
                     });
                     return;
                 }
@@ -117,7 +117,7 @@ public class UmapComputeService {
                 postStatus("Building neighbor graph (k=%d)...".formatted(effectiveK));
                 NearestNeighborGraph nng = NearestNeighborGraph.descent(matrix, effectiveK);
 
-                if (cancelled) return;
+                if (cancelled || generation.get() != myGeneration) return;
 
                 // Run UMAP with pre-computed graph
                 postStatus("Optimizing layout (epochs=%d)...".formatted(params.epochs()));
